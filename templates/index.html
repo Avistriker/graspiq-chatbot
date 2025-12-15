@@ -1,0 +1,738 @@
+[file name]: index.html
+[file content begin]
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GraspIQ AI Assistant 🤖 | Intelligent Placement Guidance</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="main-header">
+            <div class="header-content">
+                <div class="logo-section">
+                    <div class="logo-circle">
+                        <i class="fas fa-brain"></i>
+                    </div>
+                    <div class="logo-text">
+                        <h1 class="logo-title">GraspIQ AI</h1>
+                        <p class="logo-subtitle">Intelligent Placement Assistant</p>
+                    </div>
+                </div>
+                
+                <div class="ai-info-section">
+                    <div class="ai-badge">
+                        <div class="badge-icon">
+                            <i class="fas fa-bolt"></i>
+                        </div>
+                        <div class="badge-content">
+                            <span class="badge-title">Powered by Groq</span>
+                            <span class="badge-model">Llama 3.1 8B • Ultra-Fast</span>
+                        </div>
+                    </div>
+                    
+                    <div class="status-indicator" id="status-indicator">
+                        <div class="status-dot active"></div>
+                        <span class="status-text" id="status-text">AI Ready</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="content-grid">
+            <!-- Chat Section -->
+            <section class="chat-section">
+                <div class="chat-container">
+                    <!-- Chat Header -->
+                    <div class="chat-header-card">
+                        <div class="chat-header-content">
+                            <div class="chat-title">
+                                <i class="fas fa-robot chat-icon"></i>
+                                <h2>AI Career Assistant</h2>
+                            </div>
+                            <p class="chat-description">Ask me anything about placements, interviews, career guidance, or GraspIQ services</p>
+                        </div>
+                        
+                        <div class="model-stats">
+                            <div class="stat-item">
+                                <i class="fas fa-microchip"></i>
+                                <span>Llama 3.1</span>
+                            </div>
+                            <div class="stat-item">
+                                <i class="fas fa-bolt"></i>
+                                <span>Instant Responses</span>
+                            </div>
+                            <div class="stat-item">
+                                <i class="fas fa-shield-alt"></i>
+                                <span>Expert Guidance</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Chat Messages -->
+                    <div class="chat-messages-wrapper">
+                        <div class="chat-messages" id="chat-messages">
+                            <!-- Welcome Message -->
+                            <div class="message-wrapper bot-message">
+                                <div class="message-avatar">
+                                    <div class="avatar-circle">
+                                        <i class="fas fa-robot"></i>
+                                    </div>
+                                </div>
+                                <div class="message-content">
+                                    <div class="message-header">
+                                        <span class="sender-name">GraspIQ AI Assistant</span>
+                                        <span class="message-time">Ready to assist</span>
+                                    </div>
+                                    <div class="message-body">
+                                        <p class="welcome-text">👋 Welcome to your AI Placement Assistant!</p>
+                                        <p>I'm powered by <strong>Groq's Llama 3.1</strong> to provide intelligent, real-time guidance on placements, interviews, and career development.</p>
+                                        
+                                        <div class="capabilities-grid">
+                                            <div class="capability-item">
+                                                <i class="fas fa-graduation-cap"></i>
+                                                <span>Placement Prep</span>
+                                            </div>
+                                            <div class="capability-item">
+                                                <i class="fas fa-code"></i>
+                                                <span>Technical Guidance</span>
+                                            </div>
+                                            <div class="capability-item">
+                                                <i class="fas fa-user-tie"></i>
+                                                <span>Career Advice</span>
+                                            </div>
+                                            <div class="capability-item">
+                                                <i class="fas fa-chart-line"></i>
+                                                <span>Skill Development</span>
+                                            </div>
+                                        </div>
+                                        
+                                        <p>I can help you with:</p>
+                                        <ul>
+                                            <li>Interview preparation strategies</li>
+                                            <li>Resume and LinkedIn optimization</li>
+                                            <li>Company-specific guidance</li>
+                                            <li>Technical skill development</li>
+                                            <li>GraspIQ platform information</li>
+                                            <li>General career counseling</li>
+                                        </ul>
+                                        <p>What would you like to know today?</p>
+                                    </div>
+                                    <div class="message-footer">
+                                        <span class="intent-badge">AI Assistant</span>
+                                        <span class="model-badge">Llama 3.1 Powered</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Quick Suggestions -->
+                    <div class="suggestions-section">
+                        <div class="suggestions-header">
+                            <i class="fas fa-lightbulb"></i>
+                            <h3>Quick Start Questions</h3>
+                        </div>
+                        <div class="suggestions-grid" id="suggestions-grid">
+                            <!-- Populated by JavaScript -->
+                        </div>
+                    </div>
+
+                    <!-- Input Section -->
+                    <div class="input-section">
+                        <form id="chat-form" class="chat-form">
+                            <div class="input-group">
+                                <div class="input-icon">
+                                    <i class="fas fa-comment-alt"></i>
+                                </div>
+                                <input 
+                                    type="text" 
+                                    id="user-input" 
+                                    class="chat-input"
+                                    placeholder="Ask about placements, interviews, career advice, or GraspIQ..."
+                                    autocomplete="off"
+                                    autofocus
+                                >
+                                <button type="submit" id="send-btn" class="send-button">
+                                    <i class="fas fa-paper-plane"></i>
+                                    <span>Send</span>
+                                </button>
+                            </div>
+                            
+                            <div class="input-hints">
+                                <div class="hint-item">
+                                    <i class="fas fa-keyboard"></i>
+                                    <span>Press Enter to send</span>
+                                </div>
+                                <div class="hint-item">
+                                    <i class="fas fa-clock"></i>
+                                    <span>Real-time AI responses</span>
+                                </div>
+                                <div class="hint-item">
+                                    <i class="fas fa-infinity"></i>
+                                    <span>Unlimited questions</span>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Information Panel -->
+            <aside class="info-section">
+                <!-- About Card -->
+                <div class="info-card">
+                    <div class="card-header">
+                        <i class="fas fa-university"></i>
+                        <h3>About GraspIQ</h3>
+                    </div>
+                    <div class="card-content">
+                        <p class="card-description">Your intelligent placement partner providing company-specific preparation, expert mentorship, and career guidance.</p>
+                        
+                        <div class="features-list">
+                            <div class="feature-item">
+                                <div class="feature-icon">
+                                    <i class="fas fa-bullseye"></i>
+                                </div>
+                                <div class="feature-content">
+                                    <h4>Targeted Preparation</h4>
+                                    <p>Company-specific test series</p>
+                                </div>
+                            </div>
+                            
+                            <div class="feature-item">
+                                <div class="feature-icon">
+                                    <i class="fas fa-chart-network"></i>
+                                </div>
+                                <div class="feature-content">
+                                    <h4>Branch Customized</h4>
+                                    <p>CSE, ECE, Mech & more</p>
+                                </div>
+                            </div>
+                            
+                            <div class="feature-item">
+                                <div class="feature-icon">
+                                    <i class="fas fa-user-graduate"></i>
+                                </div>
+                                <div class="feature-content">
+                                    <h4>Expert Mentorship</h4>
+                                    <p>Industry professionals</p>
+                                </div>
+                            </div>
+                            
+                            <div class="feature-item">
+                                <div class="feature-icon">
+                                    <i class="fas fa-analytics"></i>
+                                </div>
+                                <div class="feature-content">
+                                    <h4>Performance Analytics</h4>
+                                    <p>Track your progress</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <a href="https://www.instagram.com/_graspiq_" target="_blank" class="social-button">
+                            <i class="fab fa-instagram"></i>
+                            <span>Follow @_graspiq_</span>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Quick Links -->
+                <div class="info-card">
+                    <div class="card-header">
+                        <i class="fas fa-external-link-alt"></i>
+                        <h3>Quick Access</h3>
+                    </div>
+                    <div class="card-content">
+                        <div class="links-grid">
+                            <a href="https://graspiq.in" target="_blank" class="link-item">
+                                <div class="link-icon">
+                                    <i class="fas fa-globe"></i>
+                                </div>
+                                <div class="link-content">
+                                    <span class="link-title">Website</span>
+                                    <span class="link-url">graspiq.in</span>
+                                </div>
+                            </a>
+                            
+                            <a href="https://graspiq.in/login" target="_blank" class="link-item">
+                                <div class="link-icon">
+                                    <i class="fas fa-sign-in-alt"></i>
+                                </div>
+                                <div class="link-content">
+                                    <span class="link-title">Login</span>
+                                    <span class="link-url">Access account</span>
+                                </div>
+                            </a>
+                            
+                            <a href="https://graspiq.in/register" target="_blank" class="link-item">
+                                <div class="link-icon">
+                                    <i class="fas fa-user-plus"></i>
+                                </div>
+                                <div class="link-content">
+                                    <span class="link-title">Register</span>
+                                    <span class="link-url">New account</span>
+                                </div>
+                            </a>
+                            
+                            <a href="mailto:support@graspiq.in" class="link-item">
+                                <div class="link-icon">
+                                    <i class="fas fa-envelope"></i>
+                                </div>
+                                <div class="link-content">
+                                    <span class="link-title">Support</span>
+                                    <span class="link-url">Email us</span>
+                                </div>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI System Status -->
+                <div class="info-card">
+                    <div class="card-header">
+                        <i class="fas fa-server"></i>
+                        <h3>AI System Status</h3>
+                    </div>
+                    <div class="card-content">
+                        <div class="status-grid">
+                            <div class="status-item">
+                                <div class="status-label">AI Provider</div>
+                                <div class="status-value">
+                                    <i class="fas fa-cloud"></i>
+                                    <span>Groq Cloud</span>
+                                </div>
+                            </div>
+                            
+                            <div class="status-item">
+                                <div class="status-label">AI Model</div>
+                                <div class="status-value">
+                                    <i class="fas fa-brain"></i>
+                                    <span>Llama 3.1 8B</span>
+                                </div>
+                            </div>
+                            
+                            <div class="status-item">
+                                <div class="status-label">System Status</div>
+                                <div class="status-value active">
+                                    <div class="status-dot"></div>
+                                    <span>Operational</span>
+                                </div>
+                            </div>
+                            
+                            <div class="status-item">
+                                <div class="status-label">Response Time</div>
+                                <div class="status-value">
+                                    <i class="fas fa-tachometer-alt"></i>
+                                    <span>&lt; 1 second</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="performance-stats">
+                            <div class="stat">
+                                <div class="stat-number" id="message-count">0</div>
+                                <div class="stat-label">Messages</div>
+                            </div>
+                            <div class="stat">
+                                <div class="stat-number" id="response-time">0.5s</div>
+                                <div class="stat-label">Avg Response</div>
+                            </div>
+                            <div class="stat">
+                                <div class="stat-number" id="uptime">100%</div>
+                                <div class="stat-label">Uptime</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+        </main>
+
+        <!-- Footer -->
+        <footer class="main-footer">
+            <div class="footer-content">
+                <div class="footer-left">
+                    <p>© 2024 GraspIQ AI Assistant. Professional Placement Guidance.</p>
+                    <div class="footer-links">
+                        <a href="https://graspiq.in/privacy" target="_blank">Privacy Policy</a>
+                        <a href="https://graspiq.in/terms" target="_blank">Terms of Service</a>
+                        <a href="mailto:ai-support@graspiq.in">AI Support</a>
+                    </div>
+                </div>
+                <div class="footer-right">
+                    <div class="ai-status">
+                        <span id="ai-status-text">AI System: Operational</span>
+                        <div class="connection-indicator">
+                            <div class="pulse-dot"></div>
+                            <span>Live Connection</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- JavaScript -->
+    <script>
+        class ProfessionalChatbot {
+            constructor() {
+                this.messageCount = 0;
+                this.isLoading = false;
+                this.startTime = Date.now();
+                this.typingTimeout = null;
+                this.init();
+            }
+            
+            async init() {
+                this.chatMessages = document.getElementById('chat-messages');
+                this.chatForm = document.getElementById('chat-form');
+                this.userInput = document.getElementById('user-input');
+                this.sendBtn = document.getElementById('send-btn');
+                this.suggestionsGrid = document.getElementById('suggestions-grid');
+                this.statusText = document.getElementById('status-text');
+                
+                this.setupEventListeners();
+                this.loadSuggestions();
+                this.checkHealth();
+                this.scrollToBottom();
+                this.startUptimeCounter();
+            }
+            
+            setupEventListeners() {
+                this.chatForm.addEventListener('submit', (e) => this.handleSubmit(e));
+                
+                this.userInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        this.handleSubmit(e);
+                    }
+                });
+                
+                this.userInput.addEventListener('input', () => {
+                    this.userInput.style.height = 'auto';
+                    this.userInput.style.height = Math.min(this.userInput.scrollHeight, 100) + 'px';
+                });
+                
+                // Focus input on page load
+                this.userInput.focus();
+            }
+            
+            async checkHealth() {
+                try {
+                    const response = await fetch('/health');
+                    const data = await response.json();
+                    
+                    if (data.status === 'healthy') {
+                        this.updateStatus('AI Ready', '#00B894');
+                        document.getElementById('ai-status-text').textContent = 'AI System: Operational';
+                    } else {
+                        this.updateStatus('Checking...', '#F59E0B');
+                    }
+                } catch (error) {
+                    console.error('Health check failed:', error);
+                    this.updateStatus('Online', '#00B894');
+                }
+            }
+            
+            updateStatus(text, color) {
+                this.statusText.textContent = text;
+                this.statusText.style.color = color;
+            }
+            
+            async loadSuggestions() {
+                try {
+                    const response = await fetch('/suggestions');
+                    const data = await response.json();
+                    this.displaySuggestions(data.suggestions);
+                } catch (error) {
+                    console.error('Error loading suggestions:', error);
+                    this.displayDefaultSuggestions();
+                }
+            }
+            
+            displayDefaultSuggestions() {
+                const defaultSuggestions = [
+                    "How to prepare for technical interviews?",
+                    "What makes a good resume?",
+                    "How GraspIQ helps students?",
+                    "Interview tips for beginners"
+                ];
+                this.displaySuggestions(defaultSuggestions);
+            }
+            
+            displaySuggestions(suggestions) {
+                this.suggestionsGrid.innerHTML = '';
+                suggestions.slice(0, 4).forEach(suggestion => {
+                    const suggestionItem = document.createElement('div');
+                    suggestionItem.className = 'suggestion-item animate__animated animate__fadeIn';
+                    suggestionItem.innerHTML = `
+                        <div class="suggestion-content">
+                            <i class="fas fa-comment-alt"></i>
+                            <span>${suggestion}</span>
+                        </div>
+                    `;
+                    
+                    suggestionItem.addEventListener('click', () => {
+                        this.userInput.value = suggestion;
+                        this.userInput.focus();
+                        setTimeout(() => {
+                            this.handleSubmit(new Event('submit'));
+                        }, 100);
+                    });
+                    
+                    this.suggestionsGrid.appendChild(suggestionItem);
+                });
+            }
+            
+            async handleSubmit(e) {
+                e.preventDefault();
+                
+                const question = this.userInput.value.trim();
+                if (!question || this.isLoading) return;
+                
+                this.addMessage(question, 'user');
+                this.userInput.value = '';
+                this.userInput.style.height = 'auto';
+                this.setLoading(true);
+                this.updateStatus('Analyzing...', '#3498db');
+                
+                const startTime = Date.now();
+                
+                try {
+                    // Show typing indicator
+                    this.showTypingIndicator();
+                    
+                    const response = await fetch('/chat', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ question })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    // Remove typing indicator
+                    this.removeTypingIndicator();
+                    
+                    if (data.status === 'success') {
+                        this.addMessage(data.answer, 'bot', data.intent);
+                        this.updateResponseTime(Date.now() - startTime);
+                    } else {
+                        throw new Error(data.answer || 'Failed to get response');
+                    }
+                    
+                } catch (error) {
+                    console.error('Error:', error);
+                    this.removeTypingIndicator();
+                    this.addMessage("I'm here to help with placement guidance. Please try again or ask another question.", 'bot');
+                } finally {
+                    this.setLoading(false);
+                    this.updateStatus('AI Ready', '#00B894');
+                    this.userInput.focus();
+                    this.updateMessageCount();
+                }
+            }
+            
+            showTypingIndicator() {
+                const typingIndicator = document.createElement('div');
+                typingIndicator.className = 'message-wrapper bot-message typing-indicator-wrapper';
+                typingIndicator.id = 'typing-indicator';
+                typingIndicator.innerHTML = `
+                    <div class="message-avatar">
+                        <div class="avatar-circle">
+                            <i class="fas fa-robot"></i>
+                        </div>
+                    </div>
+                    <div class="message-content">
+                        <div class="message-header">
+                            <span class="sender-name">GraspIQ AI Assistant</span>
+                            <span class="message-time">Typing...</span>
+                        </div>
+                        <div class="typing-indicator">
+                            <div class="typing-dot"></div>
+                            <div class="typing-dot"></div>
+                            <div class="typing-dot"></div>
+                        </div>
+                    </div>
+                `;
+                this.chatMessages.appendChild(typingIndicator);
+                this.scrollToBottom();
+            }
+            
+            removeTypingIndicator() {
+                const indicator = document.getElementById('typing-indicator');
+                if (indicator) {
+                    indicator.remove();
+                }
+            }
+            
+            addMessage(content, sender, intent = null) {
+                const messageWrapper = document.createElement('div');
+                messageWrapper.className = `message-wrapper ${sender}-message animate__animated animate__fadeInUp`;
+                
+                if (sender === 'bot') {
+                    messageWrapper.innerHTML = `
+                        <div class="message-avatar">
+                            <div class="avatar-circle">
+                                <i class="fas fa-robot"></i>
+                            </div>
+                        </div>
+                        <div class="message-content">
+                            <div class="message-header">
+                                <span class="sender-name">GraspIQ AI Assistant</span>
+                                <span class="message-time">${this.getCurrentTime()}</span>
+                            </div>
+                            <div class="message-body">
+                                ${this.formatMessage(content)}
+                            </div>
+                            ${intent ? `<div class="message-footer">
+                                <span class="intent-badge">${intent === 'general' ? 'AI Guidance' : intent}</span>
+                                <span class="model-badge">Intelligent Response</span>
+                            </div>` : '<div class="message-footer"><span class="model-badge">AI Powered Response</span></div>'}
+                        </div>
+                    `;
+                } else {
+                    messageWrapper.innerHTML = `
+                        <div class="message-avatar">
+                            <div class="avatar-circle user">
+                                <i class="fas fa-user"></i>
+                            </div>
+                        </div>
+                        <div class="message-content">
+                            <div class="message-header">
+                                <span class="sender-name">You</span>
+                                <span class="message-time">${this.getCurrentTime()}</span>
+                            </div>
+                            <div class="message-body">
+                                ${this.escapeHtml(content)}
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                this.chatMessages.appendChild(messageWrapper);
+                this.scrollToBottom();
+                this.messageCount++;
+            }
+            
+            formatMessage(text) {
+                // Clean up the text first
+                let formatted = this.escapeHtml(text);
+                
+                // Convert markdown headers
+                formatted = formatted.replace(/^# (.*$)/gm, '<h4 class="message-heading">$1</h4>');
+                formatted = formatted.replace(/^## (.*$)/gm, '<h5 class="message-subheading">$1</h5>');
+                
+                // Convert bold with **
+                formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                
+                // Convert bullet points and lists
+                formatted = formatted.replace(/^[•\-*]\s+(.*)$/gm, '<li>$1</li>');
+                formatted = formatted.replace(/^\d+\.\s+(.*)$/gm, '<li class="numbered">$1</li>');
+                
+                // Wrap consecutive list items
+                formatted = formatted.replace(/(<li>.*<\/li>)/gs, (match) => {
+                    if (match.includes('numbered')) {
+                        return '<ol class="message-list">' + match + '</ol>';
+                    }
+                    return '<ul class="message-list">' + match + '</ul>';
+                });
+                
+                // Convert line breaks to paragraphs
+                const lines = formatted.split('\n');
+                const paragraphs = [];
+                let currentParagraph = [];
+                
+                lines.forEach((line, index) => {
+                    if (line.trim() === '' && currentParagraph.length > 0) {
+                        paragraphs.push(currentParagraph.join(' '));
+                        currentParagraph = [];
+                    } else if (line.trim() !== '') {
+                        currentParagraph.push(line);
+                    }
+                });
+                
+                if (currentParagraph.length > 0) {
+                    paragraphs.push(currentParagraph.join(' '));
+                }
+                
+                formatted = paragraphs.map(p => {
+                    if (p.startsWith('<h') || p.startsWith('<ul') || p.startsWith('<ol') || p.startsWith('<li')) {
+                        return p;
+                    }
+                    return `<p>${p}</p>`;
+                }).join('');
+                
+                // Convert URLs to links
+                formatted = formatted.replace(
+                    /(https?:\/\/[^\s]+)/g, 
+                    '<a href="$1" target="_blank" rel="noopener noreferrer" class="message-link">$1</a>'
+                );
+                
+                return formatted;
+            }
+            
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+            
+            getCurrentTime() {
+                const now = new Date();
+                return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            }
+            
+            scrollToBottom() {
+                setTimeout(() => {
+                    this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+                }, 100);
+            }
+            
+            setLoading(loading) {
+                this.isLoading = loading;
+                this.sendBtn.disabled = loading;
+                
+                if (loading) {
+                    this.sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>Processing...</span>';
+                    this.sendBtn.classList.add('loading');
+                } else {
+                    this.sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i><span>Send</span>';
+                    this.sendBtn.classList.remove('loading');
+                }
+            }
+            
+            updateMessageCount() {
+                document.getElementById('message-count').textContent = this.messageCount;
+            }
+            
+            updateResponseTime(time) {
+                const seconds = (time / 1000).toFixed(2);
+                document.getElementById('response-time').textContent = `${seconds}s`;
+            }
+            
+            startUptimeCounter() {
+                setInterval(() => {
+                    const uptime = ((Date.now() - this.startTime) / 1000).toFixed(0);
+                    document.getElementById('uptime').textContent = '100%';
+                }, 60000);
+            }
+        }
+        
+        // Initialize chatbot
+        document.addEventListener('DOMContentLoaded', () => {
+            window.chatbot = new ProfessionalChatbot();
+        });
+    </script>
+</body>
+</html>
