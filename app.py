@@ -511,7 +511,7 @@ def stream_chat():
             
         except Exception as e:
             logger.error(f"Streaming error: {e}")
-            yield f"data: {json.dumps({'content': "I can help with placement guidance. Please ask me a question."})}\n\n"
+            yield f"data: {json.dumps({'content': 'I can help with placement guidance. Please ask me a question.'})}\n\n"
             yield "data: [DONE]\n\n"
     
     return Response(generate(), mimetype='text/event-stream')
