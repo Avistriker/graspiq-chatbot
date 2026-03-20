@@ -1,739 +1,656 @@
 import os
-import logging
-import time
-from flask import Flask, render_template, request, jsonify, Response
-from flask_cors import CORS
-from dotenv import load_dotenv
-from openai import OpenAI  # Using OpenAI SDK for compatibility
-import json
+import PyPDF2
+import requests
+from flask import Flask, render_template, request, jsonify
 from datetime import datetime
+from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+import logging
 
 # Load environment variables
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize Flask app
+# Configuration
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+MODEL_NAME = os.getenv("MODEL_NAME", "deepseek-chat")
+
+FLASK_DEBUG = os.getenv("FLASK_DEBUG", "False").lower() == "true"
+FLASK_PORT = int(os.getenv("FLASK_PORT", "5000"))
+FLASK_HOST = os.getenv("FLASK_HOST", "0.0.0.0")
+SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
+
+UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "uploads")
+MAX_CONTENT_LENGTH_MB = int(os.getenv("MAX_CONTENT_LENGTH_MB", "16"))
+CHAT_HISTORY_LIMIT = int(os.getenv("CHAT_HISTORY_LIMIT", "100"))
+ENABLE_AI_MODE = os.getenv("ENABLE_AI_MODE", "True").lower() == "true"
+DEFAULT_CHAT_MODE = os.getenv("DEFAULT_CHAT_MODE", "no_ai")
+
+# Initialize Flask app - IMPORTANT: Name must be 'app' for Gunicorn
 app = Flask(__name__)
-app.secret_key = os.getenv('FLASK_SECRET_KEY', 'graspiq-secret-key-2024')
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH_MB * 1024 * 1024
+app.config['SECRET_KEY'] = SECRET_KEY
 
-# Enable CORS
-CORS(app)
+# Create directories
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs('templates', exist_ok=True)
+os.makedirs('static', exist_ok=True)
 
-# Initialize SambaNova client using OpenAI SDK
-sambanova_client = None
-SAMBA_API_KEY = os.getenv('SAMBA_API_KEY', '5f583be5-0004-41b8-9300-50f2a35d52c5').strip()
+# Global variables
+pdf_content = ""
+web_content = ""
+chat_mode = DEFAULT_CHAT_MODE
+chat_history = []
 
-if SAMBA_API_KEY:
+# ========== HELPER FUNCTIONS ==========
+
+def extract_text_from_pdf(file_path):
+    """Extract text from PDF file"""
+    text = ""
     try:
-        # Remove < > brackets if present in the API key
-        api_key_clean = SAMBA_API_KEY.strip('<>')
-        
-        sambanova_client = OpenAI(
-            api_key=api_key_clean,
-            base_url="https://api.sambanova.ai/v1",
-        )
-        logger.info("✅ SambaNova client initialized successfully with OpenAI SDK")
-        
-        # Test the connection
-        try:
-            test_response = sambanova_client.chat.completions.create(
-                model="DeepSeek-V3.1-Terminus",
-                messages=[{"role": "user", "content": "Hello"}],
-                temperature=0.1,
-                top_p=0.1,
-                max_tokens=10,
-            )
-            logger.info("✅ SambaNova API connection test successful")
-        except Exception as test_error:
-            logger.error(f"❌ SambaNova API test failed: {test_error}")
-            logger.info("⚠️ Using enhanced local mode as fallback")
-            sambanova_client = None
+        with open(file_path, "rb") as file:
+            reader = PyPDF2.PdfReader(file)
+            num_pages = len(reader.pages)
+            
+            for page_num in range(num_pages):
+                page = reader.pages[page_num]
+                page_text = page.extract_text()
+                if page_text:
+                    text += f"--- Page {page_num + 1} ---\n{page_text}\n\n"
+            
+        return text, num_pages
     except Exception as e:
-        logger.error(f"❌ Failed to initialize SambaNova client: {e}")
-        logger.info("⚠️ Using enhanced local mode")
-        sambanova_client = None
-else:
-    logger.warning("⚠️ No SambaNova API key found in .env file")
-    logger.info("📚 Using enhanced local knowledge base")
+        logger.error(f"Error extracting PDF {file_path}: {str(e)}")
+        return f"Error extracting PDF: {str(e)}", 0
 
-# Enhanced GraspIQ Knowledge Base
-GRASPIQ_KNOWLEDGE = {
-    "company": {
-        "title": "🏢 COMPANIES GRASPIQ WORKS WITH",
-        "content": """**FAANG COMPANIES:**
-• Facebook/Meta
-• Amazon
-• Apple
-• Netflix
-• Google
+def summarize_pdf_text(text, max_sentences=5):
+    """Create a simple summary of PDF text"""
+    if not text:
+        return "No text extracted from PDF."
+    
+    sentences = text.replace('\n', ' ').split('. ')
+    
+    if len(sentences) <= max_sentences * 2:
+        return text[:500] + "..." if len(text) > 500 else text
+    
+    summary_sentences = sentences[:max_sentences] + sentences[-max_sentences:]
+    summary = '. '.join(summary_sentences) + '.'
+    
+    return summary[:1000] + "..." if len(summary) > 1000 else summary
 
-**TECH GIANTS:**
-• Microsoft
-• Adobe
-• Oracle
-• Intel
-• NVIDIA
+def scrape_website_simple(url):
+    """Simple web scraper without AI"""
+    try:
+        if not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        for script in soup(["script", "style"]):
+            script.decompose()
+        
+        text_elements = []
+        
+        for heading in soup.find_all(['h1', 'h2', 'h3']):
+            text_elements.append(heading.get_text(strip=True))
+        
+        for paragraph in soup.find_all('p'):
+            para_text = paragraph.get_text(strip=True)
+            if para_text and len(para_text) > 20:
+                text_elements.append(para_text)
+        
+        for li in soup.find_all('li'):
+            li_text = li.get_text(strip=True)
+            if li_text and len(li_text) > 10:
+                text_elements.append(f"• {li_text}")
+        
+        content = '\n'.join(text_elements[:50])
+        
+        if not content:
+            content = soup.get_text()
+            lines = [line.strip() for line in content.split('\n') if line.strip()]
+            content = '\n'.join(lines[:100])
+        
+        return content[:5000]
+        
+    except Exception as e:
+        logger.error(f"Error scraping website {url}: {str(e)}")
+        return f"Error scraping website: {str(e)}"
 
-**INDIAN IT COMPANIES:**
-• TCS (Tata Consultancy Services)
-• Infosys
-• Wipro
-• HCL Technologies
-• Tech Mahindra
-• Accenture
-• Cognizant
+def summarize_web_content(content):
+    """Summarize web content"""
+    if not content:
+        return "No content scraped."
+    
+    lines = content.split('\n')
+    
+    if len(lines) <= 10:
+        return content[:500] + "..." if len(content) > 500 else content
+    
+    summary_lines = lines[:5] + ["..."] + lines[-5:]
+    return '\n'.join(summary_lines)
 
-**STARTUPS & PRODUCT COMPANIES:**
-• Flipkart
-• Ola
-• Swiggy
-• Zomato
-• Paytm
-• Uber
-• Airbnb
-• Spotify
-• Salesforce
-• LinkedIn
-
-**FINANCE & CONSULTING:**
-• Goldman Sachs
-• Morgan Stanley
-• JP Morgan
-• McKinsey & Company
-• Boston Consulting Group
-
-**SERVICE-BASED COMPANIES:**
-• Capgemini
-• IBM
-• Dell
-• HP
-• Cisco"""
-    },
-    "login": {
-        "title": "🔐 GRASPIQ LOGIN INSTRUCTIONS",
-        "content": """**Website:** https://graspiq.in
-**Login Page:** https://graspiq.in/login
-**Register:** https://graspiq.in/register
-
-**STEP-BY-STEP LOGIN:**
-1. Visit https://graspiq.in
-2. Click Login button (top right corner)
-3. Enter your registered email address
-4. Enter your password
-5. Click Sign In button
-
-**FORGOT PASSWORD?**
-1. Go to https://graspiq.in/login
-2. Click Forgot Password?
-3. Enter your registered email
-4. Check email for reset link
-5. Create new password
-
-**NEW USER REGISTRATION:**
-1. Visit https://graspiq.in/register
-2. Fill in: Full Name, Email, Phone
-3. Create secure password
-4. Verify email address
-5. Complete your profile
-
-📞 Need help? Contact: support@graspiq.in"""
-    },
-    "courses": {
-        "title": "📚 GRASPIQ COURSES & PROGRAMS",
-        "content": """**TECHNICAL TRAINING:**
-• Data Structures & Algorithms
-• System Design & Architecture
-• Object-Oriented Programming
-• Database Management Systems
-• Operating Systems
-• Computer Networks
-• Software Engineering
-
-**INTERVIEW PREPARATION:**
-• Mock Technical Interviews
-• Coding Practice Sessions
-• Problem Solving Strategies
-• Behavioral Interview Training
-• Communication Skills
-• Resume Building Workshops
-
-**COMPANY-SPECIFIC PROGRAMS:**
-• FAANG Company Preparation
-• Startup Interview Guides
-• Service Company Patterns
-• Product Company Strategies
-
-**RESUME & PROFILE:**
-• Professional Resume Building
-• ATS-Optimized Templates
-• LinkedIn Profile Optimization
-• Portfolio Development
-
-**MENTORSHIP:**
-• 1:1 Expert Guidance Sessions
-• Career Counseling
-• Progress Tracking
-• Doubt Resolution
-• Personalized Roadmaps
-
-Visit: https://graspiq.in/courses for detailed information."""
-    },
-    "support": {
-        "title": "📞 GRASPIQ SUPPORT & CONTACT",
-        "content": """**Email:** support@graspiq.in
-**Phone:** +91-9876543210
-**WhatsApp:** +91-9876543210
-**Website:** https://graspiq.in/contact
-
-**OFFICE HOURS:**
-Monday - Saturday: 9:00 AM - 6:00 PM IST
-Sunday: Closed
-
-**TECHNICAL SUPPORT:**
-For login issues, website problems, or technical difficulties:
-1. Clear browser cache and cookies
-2. Try using Google Chrome browser
-3. Check your internet connection
-4. Take screenshot of the issue
-5. Email support with details
-
-**QUICK RESOLUTION:**
-Please include your:
-• Registered email address
-• Detailed description of issue
-• Screenshot (if applicable)
-• Browser and device information
-
-We're committed to helping you succeed!"""
-    },
-    "about": {
-        "title": "🎯 WHAT IS GRASPIQ?",
-        "content": """Think of us as your personal placement coach—available 24/7, affordable, and designed specifically for YOUR college, YOUR branch, and YOUR dream company.
-
-**The Problem We Solve:**
-You're preparing for placements, but:
-• Generic test platforms don't match actual company patterns
-• You don't know if you're ready for TCS vs. Infosys vs. Wipro
-• Mock tests feel nothing like the real thing
-• Branch-specific preparation? Almost impossible to find!
-
-**Our Solution:**
-Grasp IQ gives you company-specific, branch-specific test series that mirror actual placement exams—down to the pattern, difficulty level, and time pressure.
-
-**What Makes Us Different?**
-✅ Company-Specific Tests – Practice exactly what TCS, Wipro, Infosys, or Accenture will ask
-✅ Branch-Tailored – CSE, ECE, Mechanical, Civil—each gets relevant questions
-✅ Fully Proctored – Real exam experience with AI monitoring
-✅ Affordable Plans – Quality prep without burning a hole in your pocket
-✅ Live Mentorship – Monthly guest lectures from industry experts
-
-**In Simple Words:**
-"We help you practice the EXACT tests your dream companies will give you—so on placement day, you walk in confident, not confused."
-
-**Coming Soon:**
-• Interview preparation modules
-• Government exam prep
-• Video solutions for every question
-• Mobile app for practice on-the-go
-
-👉 Follow us: https://www.instagram.com/_graspiq_"""
+def analyze_content_simple(content):
+    """Simple content analysis"""
+    if not content:
+        return None
+    
+    lines = content.split('\n')
+    words = ' '.join(lines).split()
+    
+    stats = {
+        'total_lines': len(lines),
+        'total_characters': len(content),
+        'total_words': len(words),
+        'avg_line_length': sum(len(line) for line in lines) / max(len(lines), 1),
+        'max_line_length': max((len(line) for line in lines), default=0),
+        'min_line_length': min((len(line) for line in lines if line.strip()), default=0),
+        'empty_lines': sum(1 for line in lines if not line.strip())
     }
-}
+    
+    word_freq = {}
+    for word in words:
+        word_lower = word.lower()
+        word_freq[word_lower] = word_freq.get(word_lower, 0) + 1
+    
+    top_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)[:10]
+    
+    return {
+        'stats': stats,
+        'top_words': [{'word': word, 'count': count} for word, count in top_words]
+    }
 
-def detect_intent(question):
-    """Detect the intent of the question"""
+def basic_chat_response(question, pdf_text, web_text):
+    """Basic rule-based chat response"""
     question_lower = question.lower()
     
-    # Greetings
-    if any(keyword in question_lower for keyword in ['hello', 'hi', 'hey', 'greetings']):
-        return "greeting"
+    greetings = ['hello', 'hi', 'hey', 'greetings']
+    if any(greet in question_lower for greet in greetings):
+        return "Hello! I'm your document assistant. I can help you with PDF and web content analysis."
     
-    # GraspIQ specific intents
-    if any(keyword in question_lower for keyword in ['company', 'companies', 'hire', 'recruit', 'tcs', 'infosys', 'wipro', 'faang']):
-        return "company"
-    elif any(keyword in question_lower for keyword in ['login', 'sign in', 'password', 'register', 'account', 'website']):
-        return "login"
-    elif any(keyword in question_lower for keyword in ['course', 'program', 'training', 'learn', 'study', 'syllabus']):
-        return "courses"
-    elif any(keyword in question_lower for keyword in ['support', 'help', 'contact', 'email', 'phone']):
-        return "support"
-    elif any(keyword in question_lower for keyword in ['what is', 'about grasp', 'graspiq', 'platform']):
-        return "about"
+    if 'help' in question_lower:
+        return """I can help you with:
+1. Upload and analyze PDF documents
+2. Scrape and analyze website content
+3. Answer basic questions about loaded content
+4. Switch to AI mode for more advanced questions (if enabled)"""
     
-    return "general"
-
-def get_local_response(intent, question):
-    """Get response from local knowledge base"""
-    if intent in GRASPIQ_KNOWLEDGE:
-        return GRASPIQ_KNOWLEDGE[intent]['content']
+    responses = []
     
-    # Greeting response
-    if intent == "greeting":
-        return """Hello! 👋 I'm your GraspIQ AI Assistant powered by SambaNova's DeepSeek-V3.1-Terminus!
-
-I can help you with:
-🏢 **Companies** - Which companies GraspIQ prepares for
-🔐 **Login Help** - How to access your account
-📚 **Courses** - Available training programs
-📞 **Support** - Contact information
-🎯 **Placement Tips** - Interview preparation advice
-💼 **Career Guidance** - Resume building and interview skills
-💻 **Technical Skills** - Coding and DSA guidance
-
-What would you like to know about today?"""
+    if pdf_text:
+        if any(word in question_lower for word in ['pdf', 'document', 'file']):
+            lines = pdf_text.split('\n')
+            page_count = len([line for line in lines if line.startswith('--- Page')])
+            char_count = len(pdf_text)
+            
+            preview_lines = []
+            for line in lines:
+                if not line.startswith('--- Page') and len(line.strip()) > 10:
+                    preview_lines.append(line.strip())
+                    if len(preview_lines) >= 3:
+                        break
+            
+            preview = "\n".join(preview_lines[:3])
+            
+            responses.append(f"📄 **PDF Information:**")
+            responses.append(f"- Pages: {page_count}")
+            responses.append(f"- Characters: {char_count:,}")
+            responses.append(f"- Preview: {preview[:200]}..." if len(preview) > 200 else f"- Preview: {preview}")
     
-    # General response
-    return """I'm your AI Placement Assistant powered by SambaNova's DeepSeek-V3.1-Terminus! I can help you with:
-
-🎯 **Placement & Career:**
-• Interview preparation strategies
-• Resume building and optimization
-• Technical skill development (DSA, System Design)
-• Company-specific guidance
-• Career roadmap planning
-
-🏢 **GraspIQ Services:**
-• Company-specific test series
-• Branch-tailored preparation (CSE, ECE, Mechanical, etc.)
-• Mock interviews with feedback
-• Expert mentorship programs
-• Platform login and support
-
-💡 **General Questions:**
-Feel free to ask me anything about placements, technology, career advice, or general knowledge!
-
-What would you like to know?"""
-
-def query_sambanova_api(question, context=""):
-    """Query SambaNova API using OpenAI SDK"""
-    try:
-        if context:
-            system_prompt = f"""You are GraspIQ AI Assistant, an intelligent chatbot for the GraspIQ placement preparation platform.
-
-CONTEXT INFORMATION:
-{context}
-
-YOUR ROLE:
-1. Provide accurate, helpful information about GraspIQ services
-2. For placement-related questions, offer practical, actionable advice
-3. Format responses clearly with proper spacing and structure
-4. Use bullet points only when listing multiple items
-5. Keep responses professional, friendly, and student-focused
-6. If asked about unrelated topics, provide helpful information or politely redirect
-
-RESPONSE GUIDELINES:
-- Start with a friendly greeting if appropriate
-- Use clear headings with **bold** for important sections
-- Keep paragraphs concise (2-3 lines maximum)
-- End with a helpful suggestion or question
-- Format lists with proper bullet points
-- Be encouraging and supportive"""
+    if web_text:
+        if any(word in question_lower for word in ['web', 'website', 'site', 'page', 'url']):
+            lines = web_text.split('\n')
+            line_count = len(lines)
+            char_count = len(web_text)
+            
+            preview = "\n".join([line.strip() for line in lines[:3] if line.strip()])
+            
+            responses.append(f"🌐 **Website Information:**")
+            responses.append(f"- Lines extracted: {line_count}")
+            responses.append(f"- Characters: {char_count:,}")
+            responses.append(f"- Preview: {preview[:200]}..." if len(preview) > 200 else f"- Preview: {preview}")
+    
+    if responses:
+        return '\n'.join(responses)
+    
+    if 'summary' in question_lower or 'summarize' in question_lower:
+        if pdf_text:
+            summary = summarize_pdf_text(pdf_text)
+            return f"📄 **PDF Summary:**\n{summary}"
+        elif web_text:
+            summary = summarize_web_content(web_text)
+            return f"🌐 **Website Summary:**\n{summary}"
         else:
-            system_prompt = """You are GraspIQ AI Assistant, an intelligent career and placement advisor powered by SambaNova's DeepSeek-V3.1-Terminus.
-
-YOUR CAPABILITIES:
-1. Answer questions about placements, interviews, and career guidance
-2. Provide technical and soft skills development advice
-3. Offer study and preparation strategies
-4. Help with resume building, LinkedIn optimization, and portfolio development
-5. Guide on company research, interview preparation, and negotiation skills
-6. Provide information about GraspIQ placement platform
-7. Answer general knowledge questions with a focus on career relevance
-
-RESPONSE STYLE:
-- Professional yet approachable tone
-- Practical, actionable advice
-- Clear, organized formatting
-- Concise paragraphs with proper spacing
-- Use bullet points only for lists, not for single items
-- Be encouraging, motivational, and supportive
-
-SCOPE:
-You can answer questions on any topic, but always try to relate it to career growth, skill development, or placement preparation when possible."""
-
-        # Create messages for chat completion
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": question}
-        ]
-
-        # Using chat.completions.create for SambaNova
-        completion = sambanova_client.chat.completions.create(
-            model="DeepSeek-V3.1-Terminus",
-            messages=messages,
-            temperature=0.1,
-            top_p=0.1,
-            max_tokens=1024,
-            stream=False
-        )
-        
-        response = completion.choices[0].message.content
-        return response
-        
-    except Exception as e:
-        logger.error(f"SambaNova API query failed: {e}")
-        return None
-
-def clean_response(text):
-    """Clean and format the response text"""
-    if not text:
-        return text
+            return "No content loaded. Please upload a PDF or scrape a website first."
     
-    # Remove excessive newlines
-    lines = text.split('\n')
-    cleaned_lines = []
-    
-    for line in lines:
-        line = line.strip()
-        if line:
-            cleaned_lines.append(line)
-    
-    # Join with proper spacing
-    return '\n\n'.join(cleaned_lines)
-
-def generate_response(question):
-    """Generate response using SambaNova API with local fallback"""
-    start_time = time.time()
-    
-    # First, check for specific GraspIQ intents
-    intent = detect_intent(question)
-    
-    # If it's a GraspIQ specific question, provide local context
-    context = ""
-    if intent in GRASPIQ_KNOWLEDGE:
-        context = GRASPIQ_KNOWLEDGE[intent]['content']
-    
-    # Try to use SambaNova API
-    if sambanova_client:
-        try:
-            sambanova_response = query_sambanova_api(question, context)
-            if sambanova_response:
-                response_time = time.time() - start_time
-                logger.info(f"✅ SambaNova AI response generated in {response_time:.2f}s")
-                cleaned_response = clean_response(sambanova_response)
-                return cleaned_response, "ai_generated"
-        except Exception as e:
-            logger.warning(f"⚠️ SambaNova API failed, using fallback: {e}")
-    
-    # Fallback to local response
-    local_response = get_local_response(intent, question)
-    response_time = time.time() - start_time
-    logger.info(f"📚 Local response generated in {response_time:.2f}s (intent: {intent})")
-    
-    return local_response, intent
-
-@app.route('/')
-def home():
-    """Render the main chat interface"""
-    return render_template('index.html')
-
-@app.route('/chat', methods=['POST'])
-def chat():
-    """Handle chat messages"""
-    try:
-        data = request.json
-        question = data.get('question', '').strip()
-        
-        if not question:
-            return jsonify({'answer': 'Please enter a question.'})
-        
-        logger.info(f"📨 User question: {question[:100]}...")
-        
-        # Generate response
-        response, intent = generate_response(question)
-        
-        return jsonify({
-            'answer': response,
-            'intent': intent,
-            'status': 'success',
-            'api_available': sambanova_client is not None,
-            'response_source': 'sambanova' if intent == 'ai_generated' else 'local',
-            'model': 'DeepSeek-V3.1-Terminus' if sambanova_client else 'local_knowledge'
-        })
-        
-    except Exception as e:
-        logger.error(f"❌ Error in chat endpoint: {e}")
-        return jsonify({
-            'answer': "I'm here to help you with placement preparation, career guidance, and GraspIQ services. What would you like to know?",
-            'status': 'success',
-            'api_available': sambanova_client is not None,
-            'response_source': 'fallback'
-        })
-
-@app.route('/stream', methods=['POST'])
-def stream_chat():
-    """Streaming chat endpoint for real-time responses"""
-    def generate():
-        try:
-            data = request.json
-            question = data.get('question', '').strip()
+    if any(word in question_lower for word in ['analyze', 'statistics', 'stats', 'data']):
+        if pdf_text or web_text:
+            content = pdf_text if pdf_text else web_text
+            content_type = 'PDF' if pdf_text else 'Website'
             
-            if not question:
-                yield "data: " + json.dumps({"error": "Please enter a question"}) + "\n\n"
-                return
-            
-            if not sambanova_client:
-                response = "I can help you with placement preparation and GraspIQ services. Please ask me any question."
-                yield f"data: {json.dumps({'content': response})}\n\n"
-                yield "data: [DONE]\n\n"
-                return
-            
-            system_prompt = """You are GraspIQ AI Assistant, a helpful AI career and placement advisor.
-            Provide professional, practical advice on placements, interviews, career development, and GraspIQ services.
-            Format responses clearly and concisely."""
-            
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": question}
-            ]
-            
-            stream = sambanova_client.chat.completions.create(
-                model="DeepSeek-V3.1-Terminus",
-                messages=messages,
-                temperature=0.1,
-                top_p=0.1,
-                max_tokens=1024,
-                stream=True
-            )
-            
-            for chunk in stream:
-                if chunk.choices[0].delta.content:
-                    yield f"data: {json.dumps({'content': chunk.choices[0].delta.content})}\n\n"
-            
-            yield "data: [DONE]\n\n"
-            
-        except Exception as e:
-            logger.error(f"Streaming error: {e}")
-            yield f"data: {json.dumps({'content': 'I can help with placement guidance. Please ask me a question.'})}\n\n"
-            yield "data: [DONE]\n\n"
+            analysis = analyze_content_simple(content)
+            if analysis:
+                response = f"📊 **{content_type} Analysis:**\n"
+                response += f"- Total lines: {analysis['stats']['total_lines']:,}\n"
+                response += f"- Total characters: {analysis['stats']['total_characters']:,}\n"
+                response += f"- Total words: {analysis['stats']['total_words']:,}\n"
+                response += f"- Average line length: {analysis['stats']['avg_line_length']:.1f} characters\n"
+                response += f"- Maximum line length: {analysis['stats']['max_line_length']} characters\n"
+                response += f"- Minimum line length: {analysis['stats']['min_line_length']} characters\n"
+                response += f"- Empty lines: {analysis['stats']['empty_lines']}\n"
+                
+                if analysis['top_words']:
+                    response += f"\n🔤 **Top 5 Most Frequent Words:**\n"
+                    for i, word_data in enumerate(analysis['top_words'][:5], 1):
+                        response += f"{i}. '{word_data['word']}' - {word_data['count']} times\n"
+                
+                return response
+        else:
+            return "No content available for analysis. Please upload a PDF or scrape a website first."
     
-    return Response(generate(), mimetype='text/event-stream')
+    return "I can analyze your PDF and web content. Please upload a PDF or enter a website URL, then ask specific questions about the content."
 
-@app.route('/suggestions', methods=['GET'])
-def get_suggestions():
-    """Get suggested questions"""
-    suggestions = [
-        "How to prepare for technical interviews?",
-        "What companies does GraspIQ work with?",
-        "How to build a strong resume?",
-        "Tell me about GraspIQ courses",
-        "How to improve coding skills?",
-        "What is System Design?",
-        "How to crack FAANG interviews?",
-        "Best DSA resources for beginners",
-        "How GraspIQ helps with placements",
-        "Soft skills for interviews",
-        "How to login to GraspIQ?",
-        "Company-specific preparation tips",
-        "What is machine learning?",
-        "How to learn Python programming?",
-        "Career options for CS graduates"
-    ]
-    return jsonify({'suggestions': suggestions})
-
-@app.route('/health', methods=['GET'])
-def health_check():
-    """Health check endpoint"""
-    samba_status = "connected" if sambanova_client else "disconnected"
-    status_details = {
-        'status': 'healthy',
-        'service': 'GraspIQ AI Assistant',
-        'mode': 'sambanova_ai' if sambanova_client else 'local_mode',
-        'sambanova_status': samba_status,
-        'model': 'DeepSeek-V3.1-Terminus' if sambanova_client else 'enhanced_local',
-        'response_speed': 'fast' if sambanova_client else 'instant',
-        'capabilities': [
-            'Placement guidance & counseling',
-            'Interview preparation strategies',
-            'Resume building assistance',
-            'Technical skills development',
-            'Company-specific information',
-            'GraspIQ platform guidance',
-            'Career roadmap planning',
-            'General knowledge queries'
-        ],
-        'features': [
-            'AI-powered responses',
-            'Enhanced knowledge base',
-            'Professional advice',
-            'Student-focused guidance',
-            'Streaming responses available'
-        ],
-        'timestamp': datetime.now().isoformat()
+def call_deepseek_api(messages, temperature=0.1, top_p=0.1, max_tokens=2000):
+    """Call DeepSeek API for AI responses"""
+    if not DEEPSEEK_API_KEY:
+        logger.warning("AI mode called but no API key configured")
+        return "AI mode is not configured. Please check API settings in environment variables."
+    
+    headers = {
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json"
     }
     
-    return jsonify(status_details)
-
-@app.route('/api-status', methods=['GET'])
-def api_status():
-    """Check API status"""
-    if sambanova_client:
-        try:
-            # Quick test
-            start_time = time.time()
-            test_response = sambanova_client.chat.completions.create(
-                model="DeepSeek-V3.1-Terminus",
-                messages=[{"role": "user", "content": "Hello"}],
-                temperature=0.1,
-                top_p=0.1,
-                max_tokens=10,
-            )
-            response_time = (time.time() - start_time) * 1000
-            
-            return jsonify({
-                'status': 'active',
-                'provider': 'SambaNova Cloud',
-                'model': 'DeepSeek-V3.1-Terminus',
-                'response_time_ms': round(response_time, 2),
-                'capabilities': 'Full AI conversation on any topic',
-                'streaming_supported': True,
-                'sdk': 'OpenAI Python SDK'
-            })
-        except Exception as e:
-            return jsonify({
-                'status': 'error',
-                'provider': 'SambaNova Cloud',
-                'error': str(e),
-                'fallback_mode': True,
-                'local_capabilities': 'Enhanced placement guidance'
-            })
-    else:
-        return jsonify({
-            'status': 'local_mode',
-            'provider': 'Enhanced Knowledge Base',
-            'capabilities': 'Complete placement and career guidance',
-            'response_time': 'Instant',
-            'knowledge_coverage': [
-                'Placement strategies',
-                'Interview techniques',
-                'Resume building',
-                'Technical skills',
-                'Company information',
-                'GraspIQ services'
-            ]
-        })
-
-@app.route('/test-sambanova', methods=['GET'])
-def test_sambanova():
-    """Test SambaNova API connection"""
-    if not sambanova_client:
-        return jsonify({
-            'status': 'error',
-            'message': 'SambaNova client not initialized. Check your API key in .env file',
-            'solution': 'Add SAMBA_API_KEY=your_key_here to your .env file'
-        })
+    payload = {
+        "model": MODEL_NAME,
+        "messages": messages,
+        "temperature": temperature,
+        "top_p": top_p,
+        "max_tokens": max_tokens
+    }
     
     try:
-        start_time = time.time()
-        
-        response = sambanova_client.chat.completions.create(
-            model="DeepSeek-V3.1-Terminus",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": "Say 'SambaNova API is working with OpenAI SDK!'"}
-            ],
-            temperature=0.1,
-            top_p=0.1,
-            max_tokens=20,
+        logger.info(f"Calling DeepSeek API with {len(messages)} messages")
+        response = requests.post(
+            f"{DEEPSEEK_BASE_URL}/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=30
         )
         
-        response_time = (time.time() - start_time) * 1000
+        if response.status_code == 200:
+            result = response.json()
+            return result["choices"][0]["message"]["content"]
+        else:
+            logger.error(f"API Error: {response.status_code} - {response.text[:200]}")
+            return f"API Error: {response.status_code} - {response.text[:200]}"
+            
+    except requests.exceptions.Timeout:
+        logger.error("API request timeout")
+        return "AI request timed out. Please try again."
+    except Exception as e:
+        logger.error(f"Connection error: {str(e)}")
+        return f"Connection error: {str(e)}"
+
+def ai_chat_response(question, pdf_text, web_text):
+    """AI-powered chat response using DeepSeek"""
+    if not ENABLE_AI_MODE:
+        return "AI mode is disabled. Please enable it in the configuration."
+    
+    context_parts = []
+    
+    if pdf_text:
+        pdf_preview = pdf_text[:3000]
+        context_parts.append(f"PDF Content (partial):\n{pdf_preview}")
+    
+    if web_text:
+        web_preview = web_text[:2000]
+        context_parts.append(f"Web Content (partial):\n{web_preview}")
+    
+    context = "\n\n".join(context_parts)
+    
+    system_prompt = """You are ChatGenius, a helpful AI assistant powered by DeepSeek. 
+Answer questions based on the provided context when available. 
+If the context doesn't contain the answer, provide a helpful general response.
+Be concise but informative, and format your responses clearly with proper paragraphs.
+When analyzing PDF or web content, provide detailed insights, summaries, and answer specific questions about the content."""
+    
+    user_message = f"Question: {question}\n\n"
+    
+    content_status = []
+    if pdf_text:
+        pdf_lines = pdf_text.split('\n')
+        page_count = len([line for line in pdf_lines if line.startswith('--- Page')])
+        content_status.append(f"PDF: {page_count} pages, {len(pdf_text):,} characters")
+    if web_text:
+        web_lines = web_text.split('\n')
+        content_status.append(f"Web: {len(web_lines)} lines, {len(web_text):,} characters")
+    
+    if content_status:
+        user_message += f"Available content: {', '.join(content_status)}\n\n"
+    
+    if context:
+        user_message += f"Context:\n{context}\n\nPlease answer based on this context:"
+    else:
+        user_message += "No content loaded. Please answer this general question:"
+    
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_message}
+    ]
+    
+    return call_deepseek_api(messages)
+
+# ========== ROUTES ==========
+
+@app.route('/')
+def index():
+    """Render main chat interface"""
+    return render_template('chat.html', 
+                         ai_enabled=ENABLE_AI_MODE,
+                         default_mode=DEFAULT_CHAT_MODE)
+
+@app.route('/api/upload_pdf', methods=['POST'])
+def upload_pdf():
+    """Handle PDF upload for both modes"""
+    global pdf_content
+    
+    if 'pdf_file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+    
+    file = request.files['pdf_file']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    
+    if not file.filename.lower().endswith('.pdf'):
+        return jsonify({'error': 'Please upload a PDF file'}), 400
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"pdf_{timestamp}_{file.filename}"
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    
+    try:
+        file.save(file_path)
         
-        return jsonify({
-            'status': 'success',
-            'message': 'SambaNova API is working correctly!',
-            'response': response.choices[0].message.content,
-            'response_time_ms': round(response_time, 2),
-            'model': 'DeepSeek-V3.1-Terminus',
-            'sdk_method': 'OpenAI Python SDK'
-        })
+        extracted_text, num_pages = extract_text_from_pdf(file_path)
+        
+        if isinstance(extracted_text, str) and extracted_text.startswith("Error"):
+            return jsonify({'error': extracted_text}), 500
+        
+        pdf_content = extracted_text
+        logger.info(f"PDF uploaded: {filename}, {num_pages} pages, {len(extracted_text):,} chars")
+        
+        summary = summarize_pdf_text(extracted_text)
+        
+        analysis = analyze_content_simple(extracted_text)
+        
+        response_data = {
+            'success': True,
+            'message': f'✅ PDF uploaded successfully!',
+            'details': f'Extracted {len(extracted_text):,} characters from {num_pages} pages.',
+            'summary': summary[:500] + "..." if len(summary) > 500 else summary,
+            'preview': extracted_text[:300] + "..." if len(extracted_text) > 300 else extracted_text,
+            'num_pages': num_pages
+        }
+        
+        if analysis:
+            response_data['analysis'] = {
+                'total_lines': analysis['stats']['total_lines'],
+                'total_characters': analysis['stats']['total_characters'],
+                'total_words': analysis['stats']['total_words'],
+                'avg_line_length': float(analysis['stats']['avg_line_length'])
+            }
+        
+        return jsonify(response_data)
         
     except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': 'SambaNova API test failed',
-            'error': str(e),
-            'solution': 'Check your API key and internet connection'
-        })
+        logger.error(f"Failed to process PDF {filename}: {str(e)}")
+        return jsonify({'error': f'Failed to process PDF: {str(e)}'}), 500
+    finally:
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except:
+                pass
 
-@app.route('/models', methods=['GET'])
-def get_models():
-    """Get available SambaNova models"""
-    if not sambanova_client:
+@app.route('/api/scrape_website', methods=['POST'])
+def scrape_website():
+    """Handle website scraping for both modes"""
+    global web_content
+    
+    data = request.json
+    url = data.get("url", "").strip()
+    
+    if not url:
+        return jsonify({'error': 'Please provide a website URL'}), 400
+    
+    scraped_content = scrape_website_simple(url)
+    
+    if scraped_content.startswith("Error"):
+        return jsonify({'error': scraped_content}), 400
+    
+    web_content = scraped_content
+    logger.info(f"Website scraped: {url}, {len(scraped_content):,} chars")
+    
+    summary = summarize_web_content(scraped_content)
+    
+    analysis = analyze_content_simple(scraped_content)
+    
+    response_data = {
+        'success': True,
+        'message': '✅ Website scraped successfully!',
+        'details': f'Extracted {len(scraped_content):,} characters.',
+        'summary': summary[:500] + "..." if len(summary) > 500 else summary,
+        'preview': scraped_content[:300] + "..." if len(scraped_content) > 300 else scraped_content,
+        'lines': len(scraped_content.split('\n'))
+    }
+    
+    if analysis:
+        response_data['analysis'] = {
+            'total_lines': analysis['stats']['total_lines'],
+            'total_characters': analysis['stats']['total_characters'],
+            'total_words': analysis['stats']['total_words'],
+            'avg_line_length': float(analysis['stats']['avg_line_length'])
+        }
+    
+    return jsonify(response_data)
+
+@app.route('/api/chat', methods=['POST'])
+def chat():
+    """Handle chat messages for both modes"""
+    global chat_mode, pdf_content, web_content
+    
+    data = request.json
+    question = data.get("question", "").strip()
+    mode = data.get("mode", chat_mode)
+    
+    if not question:
+        return jsonify({'error': 'Please enter a question'}), 400
+    
+    if len(chat_history) >= CHAT_HISTORY_LIMIT:
+        chat_history.pop(0)
+    
+    chat_history.append({
+        'timestamp': datetime.now().isoformat(),
+        'question': question,
+        'mode': mode
+    })
+    
+    if mode == "ai" and ENABLE_AI_MODE:
+        response = ai_chat_response(question, pdf_content, web_content)
+    else:
+        if mode == "ai" and not ENABLE_AI_MODE:
+            response = "AI mode is disabled. Using basic mode instead.\n\n" + \
+                      basic_chat_response(question, pdf_content, web_content)
+        else:
+            response = basic_chat_response(question, pdf_content, web_content)
+    
+    if chat_history:
+        chat_history[-1]['response'] = response[:500] + "..." if len(response) > 500 else response
+    
+    logger.info(f"Chat: mode={mode}, question={question[:50]}...")
+    
+    return jsonify({
+        'success': True,
+        'response': response,
+        'mode': mode,
+        'has_pdf': len(pdf_content) > 0,
+        'has_web': len(web_content) > 0
+    })
+
+@app.route('/api/set_mode', methods=['POST'])
+def set_mode():
+    """Set chat mode - User controls this explicitly"""
+    global chat_mode
+    
+    data = request.json
+    mode = data.get("mode", DEFAULT_CHAT_MODE)
+    
+    if mode not in ["no_ai", "ai"]:
+        return jsonify({'error': 'Invalid mode'}), 400
+    
+    if mode == "ai" and not ENABLE_AI_MODE:
         return jsonify({
-            'status': 'error',
-            'message': 'SambaNova client not initialized'
+            'error': 'AI mode is disabled in configuration',
+            'mode': 'no_ai'
+        }), 400
+    
+    chat_mode = mode
+    logger.info(f"Chat mode changed to: {mode}")
+    
+    return jsonify({
+        'success': True,
+        'message': f'Mode switched to {"AI" if mode == "ai" else "Basic"}',
+        'mode': mode
+    })
+
+@app.route('/api/clear_content', methods=['POST'])
+def clear_content():
+    """Clear loaded content"""
+    global pdf_content, web_content
+    
+    data = request.json
+    content_type = data.get("type", "all")
+    
+    message = ""
+    if content_type == "pdf" or content_type == "all":
+        pdf_content = ""
+        message += "PDF content cleared. "
+    if content_type == "web" or content_type == "all":
+        web_content = ""
+        message += "Web content cleared. "
+    
+    logger.info(f"Content cleared: {content_type}")
+    
+    return jsonify({
+        'success': True,
+        'message': message.strip() or "No content to clear"
+    })
+
+@app.route('/api/get_status', methods=['GET'])
+def get_status():
+    """Get current status"""
+    return jsonify({
+        'mode': chat_mode,
+        'pdf_loaded': len(pdf_content) > 0,
+        'pdf_length': len(pdf_content),
+        'web_loaded': len(web_content) > 0,
+        'web_length': len(web_content),
+        'history_count': len(chat_history),
+        'ai_enabled': ENABLE_AI_MODE,
+        'max_history': CHAT_HISTORY_LIMIT,
+        'features': ['pdf_analysis', 'web_scraping', 'ai_chat', 'data_analysis']
+    })
+
+@app.route('/api/clear_history', methods=['POST'])
+def clear_history():
+    """Clear chat history"""
+    global chat_history
+    chat_history = []
+    logger.info("Chat history cleared")
+    return jsonify({'success': True, 'message': 'Chat history cleared'})
+
+@app.route('/api/test_ai', methods=['GET'])
+def test_ai():
+    """Test AI connection to DeepSeek"""
+    if not ENABLE_AI_MODE:
+        return jsonify({
+            'success': False,
+            'message': 'AI mode is disabled in configuration'
+        })
+    
+    if not DEEPSEEK_API_KEY:
+        return jsonify({
+            'success': False,
+            'message': 'AI API key not configured'
         })
     
     try:
-        # Return common SambaNova models
-        models = [
-            {
-                'id': 'DeepSeek-V3.1-Terminus',
-                'name': 'DeepSeek V3.1 Terminus',
-                'description': 'Powerful model with high performance on coding and reasoning tasks',
-                'max_tokens': 32768,
-                'context_window': 32768
-            },
-            {
-                'id': 'Llama-3.2-3B-Instruct',
-                'name': 'Llama 3.2 3B Instruct',
-                'description': 'Lightweight model for fast inference',
-                'max_tokens': 8192,
-                'context_window': 8192
-            },
-            {
-                'id': 'Llama-3.1-8B-Instruct',
-                'name': 'Llama 3.1 8B Instruct',
-                'description': 'Balanced model for general purpose tasks',
-                'max_tokens': 8192,
-                'context_window': 8192
-            },
-            {
-                'id': 'Llama-3.1-70B-Instruct',
-                'name': 'Llama 3.1 70B Instruct',
-                'description': 'High-performance model for complex reasoning',
-                'max_tokens': 8192,
-                'context_window': 8192
-            }
-        ]
+        test_response = call_deepseek_api([
+            {"role": "system", "content": "You are a helpful assistant. Respond with exactly: 'AI connection successful to DeepSeek'"},
+            {"role": "user", "content": "Test connection"}
+        ], max_tokens=50)
         
-        return jsonify({
-            'status': 'success',
-            'models': models,
-            'default_model': 'DeepSeek-V3.1-Terminus'
-        })
-        
+        if "ai connection successful" in test_response.lower():
+            return jsonify({
+                'success': True,
+                'message': '✅ DeepSeek Connection Successful',
+                'response': test_response
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': '⚠️ AI responded but not as expected',
+                'response': test_response[:100]
+            })
     except Exception as e:
+        logger.error(f"AI test failed: {str(e)}")
         return jsonify({
-            'status': 'error',
-            'message': 'Failed to fetch models',
+            'success': False,
+            'message': '❌ DeepSeek Connection Failed',
             'error': str(e)
         })
 
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    debug_mode = os.environ.get('DEBUG', 'True').lower() == 'true'
+# ========== ERROR HANDLERS ==========
+
+@app.errorhandler(413)
+def too_large(e):
+    return jsonify({'error': f'File too large. Maximum size is {MAX_CONTENT_LENGTH_MB}MB'}), 413
+
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({'error': 'Resource not found'}), 404
+
+@app.errorhandler(500)
+def server_error(e):
+    logger.error(f"Server error: {str(e)}")
+    return jsonify({'error': 'Internal server error'}), 500
+
+# ========== MAIN ==========
+
+if __name__ == "__main__":
+    print("=" * 60)
+    print("🤖 ChatGenius - Document Assistant")
+    print("=" * 60)
+    print(f"AI Mode: {'Enabled' if ENABLE_AI_MODE else 'Disabled'}")
+    print(f"Default Mode: {DEFAULT_CHAT_MODE}")
+    print(f"Upload Folder: {app.config['UPLOAD_FOLDER']}")
+    print("=" * 60)
     
-    logger.info("=" * 50)
-    logger.info("🚀 Starting GraspIQ AI Assistant")
-    logger.info(f"🔧 Mode: {'SambaNova AI Enabled' if sambanova_client else 'Local Mode'}")
-    logger.info(f"🐛 Debug: {debug_mode}")
-    logger.info(f"🔌 Port: {port}")
-    logger.info(f"🤖 Model: {'DeepSeek-V3.1-Terminus' if sambanova_client else 'Enhanced Local'}")
-    logger.info(f"📦 SDK: {'OpenAI Python SDK' if sambanova_client else 'Local'}")
-    logger.info("=" * 50)
+    port = int(os.environ.get("PORT", FLASK_PORT))
+    print(f"🌐 Starting server on port {port}")
+    print("=" * 60)
     
-    if not sambanova_client:
-        logger.warning("⚠️  WARNING: SambaNova API key not found or invalid!")
-        logger.info("💡 Tip: Add SAMBA_API_KEY=your_key_here to your .env file")
-        logger.info("📚 Using enhanced local knowledge base for now")
-    
-    app.run(host='0.0.0.0', port=port, debug=debug_mode)
+    app.run(debug=FLASK_DEBUG, port=port, host=FLASK_HOST)
