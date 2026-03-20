@@ -1,17 +1,24 @@
 services:
   - type: web
-    name: graspiq-chatbot
-    env: python
+    name: doc-assistant
+    runtime: python
+    repo: https://github.com/Avistriker/Doc-Assistant
+    plan: free
+    region: oregon
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    startCommand: gunicorn app:app -c gunicorn.conf.py
     envVars:
-      - key: SAMBA_API_KEY
-        sync: false  # You'll add manually in Render dashboard
-      - key: FLASK_SECRET_KEY
-        sync: false  # You'll add manually in Render dashboard
-      - key: DEBUG
-        value: True
-      - key: PORT
-        value: 5000
-      - key: PYTHON_VERSION
-        value: 3.9.0
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: ENABLE_AI_MODE
+        value: true
+      - key: DEFAULT_CHAT_MODE
+        value: no_ai
+      - key: MAX_CONTENT_LENGTH_MB
+        value: 16
+      - key: CHAT_HISTORY_LIMIT
+        value: 100
+      - key: FLASK_DEBUG
+        value: false
